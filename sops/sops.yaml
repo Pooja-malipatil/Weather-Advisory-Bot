@@ -1,0 +1,254 @@
+# =============================================================================
+# Standard Operating Procedures (SOPs) — Weather-Advisory Support Bot
+# =============================================================================
+# This file IS the policy. Nothing in graph/ or utils/ hardcodes advice text,
+# thresholds, or severities. To add/change a rule, edit this file and restart
+# the process — no code changes required. (This is proven by evals/test_new_sop.py,
+# which adds an 11th SOP purely by appending to a copy of this file.)
+#
+# Two condition_type values are supported by the matcher (see graph/sop_matcher.py):
+#
+#   numeric   -> a list of clauses like {field, op, value} evaluated deterministically
+#                in plain Python against fields the code pulled from the Open-Meteo
+#                response. The LLM never sees raw thresholds for these; it only sees
+#                the SOPs that already numerically matched, plus the true fetched
+#                numbers, and is instructed to compose language, not evaluate them.
+#
+#   fuzzy     -> there is no clean threshold. The rule text itself describes the
+#                *situation* to recognize (e.g. "an active, named/flagged severe
+#                weather system", "conditions broadly pleasant for a relaxed
+#                outdoor gathering"). These are handed to the LLM as candidates
+#                with an instruction to select a rule ONLY if the situation it
+#                describes is actually present in the fetched data + user message,
+#                and to say NO_MATCH otherwise. The LLM cites the sop id it used;
+#                it cannot invent one because ids are drawn from this closed list.
+#
+# severity: informational | caution | warning | severe
+# categories: free text, used for matching context + eval reporting.
+# =============================================================================
+
+- id: SOP-001
+  category: outdoor_exercise
+  title: High UV during peak hours
+  condition_type: numeric
+  condition:
+    all:
+      - field: uv_index
+        op: ">="
+        value: 8
+  applies_when_activity_hint: [exercise, cycling, running, hiking, outdoor_general]
+  severity: warning
+  advice: >
+    UV index is at or above 8. Advise against unprotected outdoor exercise
+    between 11am and 4pm. Recommend sunscreen (SPF 30+), sunglasses, and a hat
+    if going out anyway, or rescheduling to early morning or evening.
+
+- id: SOP-002
+  category: outdoor_exercise
+  title: Extreme heat exertion risk
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 38
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: severe
+  advice: >
+    Temperature is at or above 38°C. Advise against strenuous outdoor exercise
+    at this time. Recommend rescheduling to cooler hours, hydrating well, and
+    watching for signs of heat exhaustion if activity cannot be postponed.
+
+- id: SOP-003
+  category: outdoor_exercise
+  title: High wind + two-wheeler risk
+  condition_type: numeric
+  condition:
+    all:
+      - field: wind_speed_10m
+        op: ">"
+        value: 40
+  applies_when_activity_hint: [cycling, motorbike, scooter, two_wheeler]
+  severity: warning
+  advice: >
+    Wind speed exceeds 40 km/h. Flag this as a genuine safety risk for cycling
+    or riding a two-wheeler (loss of control, debris), not merely a comfort
+    issue. Recommend postponing or choosing a sheltered route.
+
+- id: SOP-004
+  category: outdoor_exercise
+  title: Comfortable exercise conditions
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: "<"
+        value: 32
+      - field: wind_speed_10m
+        op: "<="
+        value: 25
+      - field: precipitation_probability
+        op: "<"
+        value: 30
+      - field: uv_index
+        op: "<"
+        value: 8
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: informational
+  advice: >
+    Conditions are within comfortable ranges for outdoor exercise (moderate
+    temperature, manageable wind, low rain chance, UV below the peak-caution
+    threshold). No specific weather precaution is required; use general
+    common sense (hydration, footwear for terrain).
+
+- id: SOP-005
+  category: travel
+  title: High chance of rain affecting travel
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: ">="
+        value: 70
+  applies_when_activity_hint: [travel, commute, driving, walking, general]
+  severity: warning
+  advice: >
+    Precipitation probability is 70% or higher. Warn of possible travel
+    delays, reduced visibility, and slippery roads. Recommend checking for
+    local traffic/transit alerts before departure and allowing extra time.
+
+- id: SOP-006
+  category: travel
+  title: Squally / gale-force coastal winds
+  condition_type: numeric
+  condition:
+    all:
+      - field: wind_speed_10m
+        op: ">="
+        value: 45
+  applies_when_activity_hint: [travel, boating, fishing, coastal, general]
+  severity: severe
+  advice: >
+    Sustained winds are 45 km/h or higher (squally conditions). Advise
+    against sea travel, small-boat operation, or fishing in affected coastal
+    waters, and caution for high-sided vehicle travel inland. Recommend
+    checking official marine/coastal warnings before heading out.
+
+- id: SOP-007
+  category: vulnerable_groups
+  title: Heat risk for elderly or very young
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 34
+  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+  severity: warning
+  advice: >
+    Temperature is 34°C or higher. For elderly people, young children, or
+    infants, advise limiting outdoor time to short windows, ensuring shade
+    and hydration, and avoiding midday hours (12pm-3pm) entirely.
+
+- id: SOP-008
+  category: vulnerable_groups
+  title: Cold-weather exposure for children/elderly
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: "<="
+        value: 8
+  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+  severity: caution
+  advice: >
+    Temperature is 8°C or below. For elderly people or young children,
+    recommend limiting continuous outdoor exposure, dressing in layers, and
+    watching for signs of cold discomfort (numbness, shivering, lethargy).
+
+- id: SOP-009
+  category: pets
+  title: Hot pavement risk for pets
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 32
+  applies_when_activity_hint: [pet, dog, dog_walk, walk_dog]
+  severity: caution
+  advice: >
+    Air temperature is 32°C or higher, meaning pavement/asphalt is likely
+    much hotter and can burn paw pads. Recommend walking pets on grass,
+    during early morning or evening, or testing pavement heat with the back
+    of your hand (5-second rule) before walking on it.
+
+- id: SOP-010
+  category: outdoor_leisure
+  title: Good picnic/park day (fuzzy, non-numeric)
+  condition_type: fuzzy
+  situation_description: >
+    The user is asking about a relaxed, low-exertion outdoor leisure activity
+    (e.g. picnic, park visit, outdoor family time, outdoor lunch/hangout) and,
+    taken together, the fetched conditions paint an overall pleasant picture
+    for sitting/lounging outdoors for a few hours: no active rain or high
+    rain probability, no extreme heat or cold, no high wind, and no severe
+    weather system in effect. There is no single hard threshold here — use
+    judgment about whether the *overall* conditions would make a few hours
+    outdoors pleasant versus merely "not technically dangerous."
+  applies_when_activity_hint: [picnic, park, leisure, family_outing, outdoor_leisure]
+  severity: informational
+  advice: >
+    Overall conditions look pleasant for a low-exertion outdoor outing like a
+    picnic or park visit. Mention the specific numbers that support this
+    (temperature, rain chance, wind) and suggest normal precautions (shade,
+    water, sun protection appropriate to time of day) rather than a
+    specific hazard.
+
+- id: SOP-011
+  category: outdoor_leisure
+  title: Marginal / mixed-signal leisure day (fuzzy, non-numeric)
+  condition_type: fuzzy
+  situation_description: >
+    The user is asking about a relaxed outdoor leisure activity (picnic, park,
+    family outing) but the conditions are mixed or borderline: e.g. moderate
+    rain chance (roughly 30-70%), somewhat high heat or wind that is not
+    severe enough to trigger a hard-safety SOP, or a forecast that could turn
+    either way within the visit window. This is not "dangerous" but it is not
+    a clearly good day either, and a generic optimistic answer would be
+    misleading.
+  applies_when_activity_hint: [picnic, park, leisure, family_outing, outdoor_leisure]
+  severity: caution
+  advice: >
+    Conditions are mixed/borderline for a relaxed outdoor outing — not
+    unsafe, but not clearly pleasant either. Name the specific mixed signal
+    (e.g. moderate rain chance, warm-but-not-extreme heat) and recommend a
+    backup plan (shade/shelter nearby, a flexible time window, or checking
+    the forecast again closer to the time) rather than a flat yes or no.
+
+- id: SOP-012
+  category: severe_weather_system
+  title: Active flagged severe weather system overrides category-specific advice
+  condition_type: fuzzy
+  situation_description: >
+    A well-marked low-pressure area, depression, cyclonic circulation, or
+    similarly named/flagged weather system (as would be reported by a
+    meteorological authority such as the IMD) is actively affecting the
+    user's location, bringing heavy to very heavy rainfall, or squally/
+    gale-force winds are affecting the user's coastal area — REGARDLESS of
+    whether the specific numeric fields pulled from the forecast look
+    extreme in isolation. The signal for this is a combination of clearly
+    elevated precipitation and/or precipitation probability sustained across
+    the day (not just the current instant) alongside high wind, OR explicit
+    mention in the fetched data/user context of a named system. Recognize
+    this as a *situational* risk that is bigger than any single field.
+  applies_when_activity_hint: [exercise, cycling, running, travel, picnic, park,
+    elderly, children, pet, general]
+  severity: severe
+  advice: >
+    An active severe weather system (heavy rainfall event and/or squally
+    winds) is affecting the location. This overrides category-specific
+    advice: lead with the rain/wind system itself — what it is, and that it
+    is officially flagged/active — before any activity-specific comment.
+    Advise deferring the planned outdoor activity, of any kind, until the
+    system passes, and to check official advisories for updates.
