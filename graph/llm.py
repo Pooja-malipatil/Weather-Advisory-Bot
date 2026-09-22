@@ -40,6 +40,11 @@ from google.genai import types
 from google.genai import errors as genai_errors
 
 MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+# Used only if MODEL_NAME is overloaded (503) for every retry attempt.
+# A more established, heavily-provisioned model is less likely to be
+# simultaneously overloaded, so this is a "keep the app answering" safety
+# net, not a quality upgrade or downgrade choice.
+FALLBACK_MODEL_NAME = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
 
 ALLOWED_ACTIVITY_HINTS = [
     "exercise", "cycling", "running", "hiking", "sports", "outdoor_general",
@@ -84,14 +89,17 @@ def _get_client() -> "genai.Client":
     return _client
 
 
-def _call(system: str, user: str, max_tokens: int = 500) -> str:
+def _call_model(model: str, system: str, user: str, max_tokens: int) -> str:
+    """Retry loop for ONE model. Raises LLMQuotaError immediately on 4xx
+    (never worth retrying), or the last ServerError once retries on this
+    model are exhausted (caller decides whether to fall back)."""
     client = _get_client()
     last_exc = None
 
     for attempt in range(_MAX_RETRIES):
         try:
             resp = client.models.generate_content(
-                model=MODEL_NAME,
+                model=model,
                 contents=user,
                 config=types.GenerateContentConfig(
                     system_instruction=system,
@@ -113,7 +121,9 @@ def _call(system: str, user: str, max_tokens: int = 500) -> str:
             # seconds and retrying the same key -- fail fast with a clear
             # message so the caller (and the user) knows to check the key
             # or quota rather than sitting through a silent multi-second
-            # retry loop that was never going to succeed.
+            # retry loop that was never going to succeed. A different
+            # model won't fix an auth/quota problem either, so this is
+            # not caught by the fallback-model logic in _call().
             status = getattr(e, "code", None) or getattr(e, "status_code", None)
             if status == 429:
                 raise LLMQuotaError(
@@ -127,10 +137,25 @@ def _call(system: str, user: str, max_tokens: int = 500) -> str:
             last_exc = e
             if attempt < _MAX_RETRIES - 1:
                 wait = _BASE_BACKOFF_SECONDS * (2 ** attempt)
-                print(f"Gemini overloaded (attempt {attempt + 1}/{_MAX_RETRIES}), retrying in {wait}s...")
+                print(f"{model} overloaded (attempt {attempt + 1}/{_MAX_RETRIES}), retrying in {wait}s...")
                 time.sleep(wait)
 
     raise last_exc
+
+
+def _call(system: str, user: str, max_tokens: int = 500) -> str:
+    """Tries MODEL_NAME first (with its own retries). If every attempt on
+    that model fails with a transient ServerError (5xx overload), falls
+    back to FALLBACK_MODEL_NAME once, with its own retries too. A 4xx from
+    either model raises LLMQuotaError immediately, unchanged from before --
+    switching models never fixes an auth or quota problem."""
+    try:
+        return _call_model(MODEL_NAME, system, user, max_tokens)
+    except genai_errors.ServerError as e:
+        if FALLBACK_MODEL_NAME and FALLBACK_MODEL_NAME != MODEL_NAME:
+            print(f"{MODEL_NAME} still overloaded after retries, falling back to {FALLBACK_MODEL_NAME}...")
+            return _call_model(FALLBACK_MODEL_NAME, system, user, max_tokens)
+        raise
 
 
 def extract_intent(
