@@ -1,49 +1,116 @@
 # =============================================================================
 # Standard Operating Procedures (SOPs) — Weather-Advisory Support Bot
 # =============================================================================
-# This file IS the policy. Nothing in graph/ or utils/ hardcodes advice text,
-# thresholds, or severities. To add/change a rule, edit this file and restart
-# the process — no code changes required. (This is proven by evals/test_new_sop.py,
-# which adds an 11th SOP purely by appending to a copy of this file.)
+# DESIGN PRINCIPLE (why this file looks the way it does):
+# Every numeric hazard axis a category cares about (temperature, wind,
+# rain chance, UV) is covered by a set of SOPs whose ranges PARTITION the
+# entire scale with no gaps and no overlaps within that axis — e.g. for
+# outdoor_exercise temperature: <0, 0-10, 10-32, 32-38, >=38 covers every
+# possible reading. Axes are independent of each other (a temperature SOP
+# doesn't also check wind), so several SOPs can legitimately match the same
+# question at once (e.g. warm temperature + high rain chance). That's
+# expected and handled by graph/sop_matcher.py's existing resolve() function
+# (severity-ranked primary + "also relevant" mentions) — NO CODE CHANGES
+# were needed for this file; only the YAML changed.
 #
-# Two condition_type values are supported by the matcher (see graph/sop_matcher.py):
+# This design is what fixes the earlier bug class: previously some SOPs used
+# combined AND-conditions across multiple fields (e.g. "comfortable" needed
+# temp AND wind AND rain AND UV all in range simultaneously), which created
+# dead zones where a value fell between two AND-combinations and matched
+# nothing. Splitting each axis into its own independent, exhaustive band
+# eliminates dead zones by construction.
 #
-#   numeric   -> a list of clauses like {field, op, value} evaluated deterministically
-#                in plain Python against fields the code pulled from the Open-Meteo
-#                response. The LLM never sees raw thresholds for these; it only sees
-#                the SOPs that already numerically matched, plus the true fetched
-#                numbers, and is instructed to compose language, not evaluate them.
-#
-#   fuzzy     -> there is no clean threshold. The rule text itself describes the
-#                *situation* to recognize (e.g. "an active, named/flagged severe
-#                weather system", "conditions broadly pleasant for a relaxed
-#                outdoor gathering"). These are handed to the LLM as candidates
-#                with an instruction to select a rule ONLY if the situation it
-#                describes is actually present in the fetched data + user message,
-#                and to say NO_MATCH otherwise. The LLM cites the sop id it used;
-#                it cannot invent one because ids are drawn from this closed list.
+# condition_type values (unchanged from before, still 2 supported):
+#   numeric -> {field, op, value} clauses evaluated deterministically in
+#              plain Python (graph/sop_matcher.py). The LLM never evaluates
+#              thresholds.
+#   fuzzy   -> situation_description handed to the LLM as a candidate; it
+#              must return a real id from the closed candidate list or
+#              NO_MATCH (graph/llm.py::pick_fuzzy_sop).
 #
 # severity: informational | caution | warning | severe
-# categories: free text, used for matching context + eval reporting.
 # =============================================================================
 
-- id: SOP-001
+# -----------------------------------------------------------------------
+# CATEGORY: outdoor_exercise  (cycling, running, hiking, sports, general)
+# -----------------------------------------------------------------------
+
+# --- temperature axis: exhaustive, <0 / 0-10 / 10-32 / 32-38 / >=38 ---
+
+- id: SOP-EX-TEMP-01
   category: outdoor_exercise
-  title: High UV during peak hours
+  title: Extreme cold exertion risk
   condition_type: numeric
   condition:
     all:
-      - field: uv_index
-        op: ">="
-        value: 8
-  applies_when_activity_hint: [exercise, cycling, running, hiking, outdoor_general]
-  severity: warning
+      - field: temperature_2m
+        op: "<"
+        value: 0
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: severe
   advice: >
-    UV index is at or above 8. Advise against unprotected outdoor exercise
-    between 11am and 4pm. Recommend sunscreen (SPF 30+), sunglasses, and a hat
-    if going out anyway, or rescheduling to early morning or evening.
+    Temperature is below 0°C. Advise against strenuous outdoor exercise;
+    risk of frostbite/hypothermia with prolonged exposure. If unavoidable,
+    recommend layered clothing, covering extremities, and limiting duration.
 
-- id: SOP-002
+- id: SOP-EX-TEMP-02
+  category: outdoor_exercise
+  title: Cold exertion caution
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 0
+      - field: temperature_2m
+        op: "<"
+        value: 10
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: caution
+  advice: >
+    Temperature is between 0°C and 10°C. Recommend warming up thoroughly,
+    dressing in layers, and being mindful of reduced grip/traction risk on
+    cold surfaces.
+
+- id: SOP-EX-TEMP-03
+  category: outdoor_exercise
+  title: Comfortable exertion temperature
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 10
+      - field: temperature_2m
+        op: "<"
+        value: 32
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: informational
+  advice: >
+    Temperature (10-32°C) is within a comfortable range for outdoor
+    exercise. No specific temperature precaution needed; use general
+    common sense (hydration, appropriate footwear for terrain).
+
+- id: SOP-EX-TEMP-04
+  category: outdoor_exercise
+  title: Warm-but-not-extreme exertion caution
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 32
+      - field: temperature_2m
+        op: "<"
+        value: 38
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: caution
+  advice: >
+    Temperature is between 32°C and 38°C. Not extreme, but warm enough that
+    prolonged exertion carries real heat-strain risk. Recommend hydrating
+    well, taking breaks in shade, and avoiding peak midday hours if possible.
+
+- id: SOP-EX-TEMP-05
   category: outdoor_exercise
   title: Extreme heat exertion risk
   condition_type: numeric
@@ -55,53 +122,188 @@
   applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
   severity: severe
   advice: >
-    Temperature is at or above 38°C. Advise against strenuous outdoor exercise
-    at this time. Recommend rescheduling to cooler hours, hydrating well, and
-    watching for signs of heat exhaustion if activity cannot be postponed.
+    Temperature is at or above 38°C. Advise against strenuous outdoor
+    exercise at this time. Recommend rescheduling to cooler hours, hydrating
+    well, and watching for signs of heat exhaustion if activity cannot be
+    postponed.
 
-- id: SOP-003
+# --- wind axis: exhaustive, <25 / 25-40 / >=40 (two-wheeler + exposed activities) ---
+
+- id: SOP-EX-WIND-01
   category: outdoor_exercise
-  title: High wind + two-wheeler risk
+  title: Manageable wind for exercise
+  condition_type: numeric
+  condition:
+    all:
+      - field: wind_speed_10m
+        op: "<"
+        value: 25
+  applies_when_activity_hint: [cycling, running, hiking, sports]
+  severity: informational
+  advice: >
+    Wind speed is manageable (under 25 km/h). No specific wind precaution
+    needed for cycling, running, or hiking.
+
+- id: SOP-EX-WIND-02
+  category: outdoor_exercise
+  title: Moderate wind caution
+  condition_type: numeric
+  condition:
+    all:
+      - field: wind_speed_10m
+        op: ">="
+        value: 25
+      - field: wind_speed_10m
+        op: "<="
+        value: 40
+  applies_when_activity_hint: [cycling, running, hiking, sports]
+  severity: caution
+  advice: >
+    Wind speed is moderate (25-40 km/h). Cycling and exposed-ridge hiking
+    may feel harder or less stable than usual; recommend a sheltered route
+    or extra caution on exposed sections, not outright avoidance.
+
+- id: SOP-EX-WIND-03
+  category: outdoor_exercise
+  title: High wind safety risk
   condition_type: numeric
   condition:
     all:
       - field: wind_speed_10m
         op: ">"
         value: 40
-  applies_when_activity_hint: [cycling, motorbike, scooter, two_wheeler]
+  applies_when_activity_hint: [cycling, motorbike, scooter, two_wheeler, hiking, running]
   severity: warning
   advice: >
-    Wind speed exceeds 40 km/h. Flag this as a genuine safety risk for cycling
-    or riding a two-wheeler (loss of control, debris), not merely a comfort
-    issue. Recommend postponing or choosing a sheltered route.
+    Wind speed exceeds 40 km/h. Flag this as a genuine safety risk (loss of
+    control on a two-wheeler, debris, instability on exposed hiking terrain),
+    not merely a comfort issue. Recommend postponing or choosing a sheltered
+    route.
 
-- id: SOP-004
+# --- UV axis: exhaustive, <8 / >=8 ---
+
+- id: SOP-EX-UV-01
   category: outdoor_exercise
-  title: Comfortable exercise conditions
+  title: UV within normal range
   condition_type: numeric
   condition:
     all:
-      - field: temperature_2m
-        op: "<"
-        value: 32
-      - field: wind_speed_10m
-        op: "<="
-        value: 25
-      - field: precipitation_probability
-        op: "<"
-        value: 30
       - field: uv_index
         op: "<"
         value: 8
   applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
   severity: informational
   advice: >
-    Conditions are within comfortable ranges for outdoor exercise (moderate
-    temperature, manageable wind, low rain chance, UV below the peak-caution
-    threshold). No specific weather precaution is required; use general
-    common sense (hydration, footwear for terrain).
+    UV index is below 8. Normal sun precautions (sunscreen if out for a
+    while) are enough; no need to reschedule around UV specifically.
 
-- id: SOP-005
+- id: SOP-EX-UV-02
+  category: outdoor_exercise
+  title: High UV during peak hours
+  condition_type: numeric
+  condition:
+    all:
+      - field: uv_index
+        op: ">="
+        value: 8
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: warning
+  advice: >
+    UV index is at or above 8. Advise against unprotected outdoor exercise
+    between 11am and 4pm. Recommend sunscreen (SPF 30+), sunglasses, and a
+    hat if going out anyway, or rescheduling to early morning or evening.
+
+# --- rain axis: exhaustive, <30 / 30-70 / >=70 ---
+
+- id: SOP-EX-RAIN-01
+  category: outdoor_exercise
+  title: Low rain chance for exercise
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: "<"
+        value: 30
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: informational
+  advice: >
+    Rain chance is low (under 30%). No specific rain precaution needed.
+
+- id: SOP-EX-RAIN-02
+  category: outdoor_exercise
+  title: Marginal rain chance for exercise
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: ">="
+        value: 30
+      - field: precipitation_probability
+        op: "<"
+        value: 70
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: caution
+  advice: >
+    There is a moderate (30-70%) chance of rain. Not dangerous, but bring
+    rain-appropriate gear, check the forecast again closer to departure, and
+    have a shorter/indoor backup plan rather than assuming clear conditions.
+
+- id: SOP-EX-RAIN-03
+  category: outdoor_exercise
+  title: High rain chance for exercise
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: ">="
+        value: 70
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: warning
+  advice: >
+    Rain chance is 70% or higher. Warn of likely wet, slippery conditions
+    and reduced visibility for outdoor exercise. Recommend rescheduling or
+    choosing a covered/indoor alternative if the activity can be moved.
+
+# -----------------------------------------------------------------------
+# CATEGORY: travel  (travel, commute, driving, walking, boating, fishing, coastal)
+# -----------------------------------------------------------------------
+
+# --- rain axis: exhaustive, <30 / 30-70 / >=70 ---
+
+- id: SOP-TR-RAIN-01
+  category: travel
+  title: Low rain chance for travel
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: "<"
+        value: 30
+  applies_when_activity_hint: [travel, commute, driving, walking, general]
+  severity: informational
+  advice: >
+    Rain chance is low (under 30%). No specific travel precaution needed.
+
+- id: SOP-TR-RAIN-02
+  category: travel
+  title: Moderate rain chance affecting travel
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: ">="
+        value: 30
+      - field: precipitation_probability
+        op: "<"
+        value: 70
+  applies_when_activity_hint: [travel, commute, driving, walking, general]
+  severity: caution
+  advice: >
+    There is a moderate (30-70%) chance of rain. Recommend allowing a bit
+    of extra travel time and keeping an eye on the forecast, without
+    expecting major disruption.
+
+- id: SOP-TR-RAIN-03
   category: travel
   title: High chance of rain affecting travel
   condition_type: numeric
@@ -117,7 +319,42 @@
     delays, reduced visibility, and slippery roads. Recommend checking for
     local traffic/transit alerts before departure and allowing extra time.
 
-- id: SOP-006
+# --- wind axis: exhaustive, <25 / 25-45 / >=45 ---
+
+- id: SOP-TR-WIND-01
+  category: travel
+  title: Manageable wind for travel
+  condition_type: numeric
+  condition:
+    all:
+      - field: wind_speed_10m
+        op: "<"
+        value: 25
+  applies_when_activity_hint: [travel, boating, fishing, coastal, general]
+  severity: informational
+  advice: >
+    Wind speed is manageable (under 25 km/h). No specific wind precaution
+    needed for travel or coastal activity.
+
+- id: SOP-TR-WIND-02
+  category: travel
+  title: Moderate wind caution for travel
+  condition_type: numeric
+  condition:
+    all:
+      - field: wind_speed_10m
+        op: ">="
+        value: 25
+      - field: wind_speed_10m
+        op: "<"
+        value: 45
+  applies_when_activity_hint: [travel, boating, fishing, coastal, general]
+  severity: caution
+  advice: >
+    Wind speed is moderate (25-45 km/h). High-sided vehicles and small
+    boats may be affected; recommend extra caution rather than avoidance.
+
+- id: SOP-TR-WIND-03
   category: travel
   title: Squally / gale-force coastal winds
   condition_type: numeric
@@ -134,7 +371,48 @@
     waters, and caution for high-sided vehicle travel inland. Recommend
     checking official marine/coastal warnings before heading out.
 
-- id: SOP-007
+# -----------------------------------------------------------------------
+# CATEGORY: vulnerable_groups  (elderly, children, infant, senior_citizen)
+# -----------------------------------------------------------------------
+
+# --- temperature axis: exhaustive, <8 / 8-34 / 34-40 / >=40 ---
+
+- id: SOP-VG-TEMP-01
+  category: vulnerable_groups
+  title: Cold-weather exposure for children/elderly
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: "<"
+        value: 8
+  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+  severity: caution
+  advice: >
+    Temperature is below 8°C. For elderly people or young children,
+    recommend limiting continuous outdoor exposure, dressing in layers, and
+    watching for signs of cold discomfort (numbness, shivering, lethargy).
+
+- id: SOP-VG-TEMP-02
+  category: vulnerable_groups
+  title: Comfortable temperature for elderly/children
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 8
+      - field: temperature_2m
+        op: "<"
+        value: 34
+  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+  severity: informational
+  advice: >
+    Temperature (8-34°C) is within a comfortable range for elderly people
+    or young children to be outside. No specific temperature precaution
+    needed beyond normal care.
+
+- id: SOP-VG-TEMP-03
   category: vulnerable_groups
   title: Heat risk for elderly or very young
   condition_type: numeric
@@ -143,6 +421,9 @@
       - field: temperature_2m
         op: ">="
         value: 34
+      - field: temperature_2m
+        op: "<"
+        value: 40
   applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
   severity: warning
   advice: >
@@ -150,23 +431,97 @@
     infants, advise limiting outdoor time to short windows, ensuring shade
     and hydration, and avoiding midday hours (12pm-3pm) entirely.
 
-- id: SOP-008
+- id: SOP-VG-TEMP-04
   category: vulnerable_groups
-  title: Cold-weather exposure for children/elderly
+  title: Extreme heat risk for elderly or very young
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">="
+        value: 40
+  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+  severity: severe
+  advice: >
+    Temperature is 40°C or higher. Strongly advise against taking elderly
+    people, young children, or infants outside at all until temperatures
+    drop; heat stroke risk is severe for these groups at this level.
+
+# --- rain axis: exhaustive, <50 / >=50 ---
+
+- id: SOP-VG-RAIN-01
+  category: vulnerable_groups
+  title: Low-to-moderate rain chance for elderly/children
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: "<"
+        value: 50
+  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+  severity: informational
+  advice: >
+    Rain chance is under 50%. No specific rain precaution needed beyond
+    normal care.
+
+- id: SOP-VG-RAIN-02
+  category: vulnerable_groups
+  title: Moderate-to-high rain chance risk for elderly/children
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: ">="
+        value: 50
+  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+  severity: caution
+  advice: >
+    Precipitation probability is 50% or higher. For elderly people or young
+    children, recommend avoiding prolonged time outside, ensuring footwear
+    has good grip on wet surfaces, and having an indoor fallback plan.
+
+# -----------------------------------------------------------------------
+# CATEGORY: pets  (pet, dog, dog_walk, walk_dog)
+# -----------------------------------------------------------------------
+
+# --- temperature axis: exhaustive, <=5 / 5-32 / >=32 ---
+
+- id: SOP-PET-TEMP-01
+  category: pets
+  title: Cold risk for pets
   condition_type: numeric
   condition:
     all:
       - field: temperature_2m
         op: "<="
-        value: 8
-  applies_when_activity_hint: [elderly, children, infant, senior_citizen, vulnerable]
+        value: 5
+  applies_when_activity_hint: [pet, dog, dog_walk, walk_dog]
   severity: caution
   advice: >
-    Temperature is 8°C or below. For elderly people or young children,
-    recommend limiting continuous outdoor exposure, dressing in layers, and
-    watching for signs of cold discomfort (numbness, shivering, lethargy).
+    Air temperature is 5°C or below. Short-haired or small pets can get
+    cold quickly; recommend a shorter walk, a coat for cold-sensitive
+    breeds, and watching for shivering or reluctance to keep walking.
 
-- id: SOP-009
+- id: SOP-PET-TEMP-02
+  category: pets
+  title: Comfortable pet-walking conditions
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: ">"
+        value: 5
+      - field: temperature_2m
+        op: "<"
+        value: 32
+  applies_when_activity_hint: [pet, dog, dog_walk, walk_dog]
+  severity: informational
+  advice: >
+    Conditions are within a comfortable range for walking pets. No specific
+    weather precaution required; use general common sense (water, shade on
+    longer walks).
+
+- id: SOP-PET-TEMP-03
   category: pets
   title: Hot pavement risk for pets
   condition_type: numeric
@@ -183,53 +538,50 @@
     during early morning or evening, or testing pavement heat with the back
     of your hand (5-second rule) before walking on it.
 
-- id: SOP-013
-  category: pets
-  title: Comfortable pet-walking conditions
-  condition_type: numeric
-  condition:
-    all:
-      - field: temperature_2m
-        op: "<"
-        value: 32
-      - field: precipitation_probability
-        op: "<"
-        value: 50
-      - field: wind_speed_10m
-        op: "<="
-        value: 30
-  applies_when_activity_hint: [pet, dog, dog_walk, walk_dog]
-  severity: informational
-  advice: >
-    Conditions are within a comfortable range for walking pets (moderate
-    temperature, manageable wind, low-to-moderate rain chance). No specific
-    weather precaution is required; use general common sense (water, shade
-    on longer walks).
+# --- rain axis: exhaustive, <70 / >=70 ---
 
-- id: SOP-014
-  category: outdoor_exercise
-  title: Marginal exercise conditions (mild-to-moderate rain chance)
+- id: SOP-PET-RAIN-01
+  category: pets
+  title: Low-to-moderate rain chance for pets
   condition_type: numeric
   condition:
     all:
-      - field: temperature_2m
-        op: "<"
-        value: 34
-      - field: precipitation_probability
-        op: ">="
-        value: 30
       - field: precipitation_probability
         op: "<"
         value: 70
-  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  applies_when_activity_hint: [pet, dog, dog_walk, walk_dog]
+  severity: informational
+  advice: >
+    Rain chance is under 70%. No specific rain precaution needed for a
+    pet walk beyond normal care.
+
+- id: SOP-PET-RAIN-02
+  category: pets
+  title: High rain chance risk for pets
+  condition_type: numeric
+  condition:
+    all:
+      - field: precipitation_probability
+        op: ">="
+        value: 70
+  applies_when_activity_hint: [pet, dog, dog_walk, walk_dog]
   severity: caution
   advice: >
-    Temperature is mild, but there is a moderate (30-70%) chance of rain.
-    Not dangerous, but bring rain-appropriate gear, check the forecast again
-    closer to departure, and have a shorter/indoor backup plan in mind
-    rather than assuming clear conditions.
+    Rain chance is 70% or higher. Heavy rain/thunder can stress pets;
+    recommend a shorter walk timed between showers, or sticking to a
+    sheltered route, rather than a long walk in open rain.
 
-- id: SOP-010
+# -----------------------------------------------------------------------
+# CATEGORY: outdoor_leisure  (picnic, park, leisure, family_outing) — fuzzy
+# -----------------------------------------------------------------------
+# This category is intentionally NOT numeric-banded: "is today good for a
+# picnic" doesn't reduce to a clean threshold (per the assignment's explicit
+# ask for at least one fuzzy, non-numeric SOP). Instead the three fuzzy
+# rules below span the full spectrum (good / marginal / poor) and the LLM
+# picks whichever situation actually matches the real fetched facts, or
+# NO_MATCH if genuinely none fit (which should be rare given the spread).
+
+- id: SOP-LEISURE-GOOD
   category: outdoor_leisure
   title: Good picnic/park day (fuzzy, non-numeric)
   condition_type: fuzzy
@@ -251,7 +603,7 @@
     water, sun protection appropriate to time of day) rather than a
     specific hazard.
 
-- id: SOP-011
+- id: SOP-LEISURE-MARGINAL
   category: outdoor_leisure
   title: Marginal / mixed-signal leisure day (fuzzy, non-numeric)
   condition_type: fuzzy
@@ -272,7 +624,35 @@
     backup plan (shade/shelter nearby, a flexible time window, or checking
     the forecast again closer to the time) rather than a flat yes or no.
 
-- id: SOP-012
+- id: SOP-LEISURE-POOR
+  category: outdoor_leisure
+  title: Poor day for outdoor leisure (fuzzy, non-numeric)
+  condition_type: fuzzy
+  situation_description: >
+    The user is asking about a relaxed outdoor leisure activity (picnic,
+    park, family outing) and conditions are genuinely unpleasant for sitting
+    outside for an extended period — e.g. high rain probability (roughly
+    70%+), very high or very low temperature, or high wind — even if no
+    single number is extreme enough to count as an active severe weather
+    system. This is a step below SOP-012 (no flagged system, just an
+    uncomfortable/impractical day) but a step above "marginal": a reasonable
+    person would actively choose to reschedule rather than go.
+  applies_when_activity_hint: [picnic, park, leisure, family_outing, outdoor_leisure]
+  severity: warning
+  advice: >
+    Conditions are poor for a relaxed outdoor outing today. Name the
+    specific driving factor (heavy rain chance, extreme heat/cold, or high
+    wind) and recommend rescheduling to a different day or moving the plan
+    indoors rather than pushing ahead.
+
+# -----------------------------------------------------------------------
+# CATEGORY: severe_weather_system — override, unchanged
+# -----------------------------------------------------------------------
+# If this matches, graph/sop_matcher.py::resolve() suppresses every other
+# match above (checked by category name, so this behavior is automatic for
+# any future SOP added to this same category).
+
+- id: SOP-SEVERE-SYSTEM
   category: severe_weather_system
   title: Active flagged severe weather system overrides category-specific advice
   condition_type: fuzzy
@@ -288,8 +668,10 @@
     the day (not just the current instant) alongside high wind, OR explicit
     mention in the fetched data/user context of a named system. Recognize
     this as a *situational* risk that is bigger than any single field.
-  applies_when_activity_hint: [exercise, cycling, running, travel, picnic, park,
-    elderly, children, pet, general]
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, travel,
+    commute, driving, walking, boating, fishing, coastal, picnic, park, leisure,
+    family_outing, outdoor_leisure, elderly, children, infant, senior_citizen,
+    vulnerable, pet, dog, dog_walk, walk_dog, outdoor_general, general]
   severity: severe
   advice: >
     An active severe weather system (heavy rainfall event and/or squally
