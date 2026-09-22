@@ -574,12 +574,6 @@
 # -----------------------------------------------------------------------
 # CATEGORY: outdoor_leisure  (picnic, park, leisure, family_outing) — fuzzy
 # -----------------------------------------------------------------------
-# This category is intentionally NOT numeric-banded: "is today good for a
-# picnic" doesn't reduce to a clean threshold (per the assignment's explicit
-# ask for at least one fuzzy, non-numeric SOP). Instead the three fuzzy
-# rules below span the full spectrum (good / marginal / poor) and the LLM
-# picks whichever situation actually matches the real fetched facts, or
-# NO_MATCH if genuinely none fit (which should be rare given the spread).
 
 - id: SOP-LEISURE-GOOD
   category: outdoor_leisure
@@ -634,9 +628,9 @@
     outside for an extended period — e.g. high rain probability (roughly
     70%+), very high or very low temperature, or high wind — even if no
     single number is extreme enough to count as an active severe weather
-    system. This is a step below SOP-012 (no flagged system, just an
-    uncomfortable/impractical day) but a step above "marginal": a reasonable
-    person would actively choose to reschedule rather than go.
+    system. This is a step below SOP-SEVERE-SYSTEM (no flagged system, just
+    an uncomfortable/impractical day) but a step above "marginal": a
+    reasonable person would actively choose to reschedule rather than go.
   applies_when_activity_hint: [picnic, park, leisure, family_outing, outdoor_leisure]
   severity: warning
   advice: >
