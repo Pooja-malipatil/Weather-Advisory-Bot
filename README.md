@@ -20,6 +20,18 @@ Get a free Gemini API key (no billing/credit card required) at
 https://aistudio.google.com/apikey. No weather API key is needed —
 Open-Meteo is free and keyless too.
 
+**Note on key format:** keys issued by AI Studio now start with `AQ.`
+(Google's current standard, replacing the older `AIzaSy...` format) — that's
+expected, not a sign something's wrong. If `graph/llm.py` raises a 401 with
+`ACCESS_TOKEN_TYPE_UNSUPPORTED`, double-check the exact key value made it
+into `.env`/your host's secrets unmodified (a stale or truncated copy is the
+usual cause), rather than assuming the key type itself is invalid.
+
+`graph/llm.py` also falls back once to a second model
+(`GEMINI_FALLBACK_MODEL`, default `gemini-2.5-flash`) if the primary model
+(`GEMINI_MODEL`, default `gemini-3.1-flash-lite`) is overloaded (503) on
+every retry attempt — see that file's `_call`/`_call_model` docstrings.
+
 ## Running it
 
 **Terminal chat:**
@@ -83,9 +95,17 @@ was overkill for ~10-15 rules where the two condition shapes I need (simple
 AND-of-comparisons, and free-text situational description) are exhaustive
 of what showed up while writing them.
 
-**12 SOPs shipped**, across 6 categories (`outdoor_exercise`, `travel`,
+**34 SOPs shipped**, across 6 categories (`outdoor_exercise`, `travel`,
 `vulnerable_groups`, `pets`, `outdoor_leisure`, `severe_weather_system`), at
-all 4 severities (`informational`, `caution`, `warning`, `severe`).
+all 4 severities (`informational`, `caution`, `warning`, `severe`). IDs
+follow a `SOP-<CATEGORY>-<AXIS>-<NN>` scheme (e.g. `SOP-EX-UV-02`,
+`SOP-VG-TEMP-04`) so a policy's category and hazard axis are readable from
+its id alone; `SOP-SEVERE-SYSTEM` and the three `SOP-LEISURE-*` ids are the
+fuzzy (non-numeric) ones. Most numeric axes (temperature, wind, rain,
+UV) are split into exhaustive, non-overlapping bands per category, so every
+possible reading matches exactly one SOP on that axis — see the comment
+block at the top of `sops/sops.yaml` for why that avoids the "falls between
+two AND-combined conditions and matches nothing" failure mode.
 
 ## Architecture (the actual graph)
 
@@ -172,17 +192,21 @@ model-recalled number could substitute for a fetched one.
 
 `evals/eval_suite.py` implements all 8 required case types:
 
-1. **Clear match #1** — direct high-UV running question.
-2. **Clear match #2** — direct high-wind cycling question.
+1. **Clear match #1** — direct high-UV running question, checked against
+   `SOP-EX-UV-02` (fires iff `uv_index >= 8`).
+2. **Clear match #2** — direct high-wind cycling question, checked against
+   `SOP-EX-WIND-03` (fires iff `wind_speed_10m > 40`).
 3. **Paraphrase #1** — "my 78-year-old grandmother on the porch" (never says
-   "elderly" or "heat"), must still resolve to the elderly-heat SOP logic.
+   "elderly" or "heat"), must still resolve to `SOP-VG-TEMP-03` (34-40°C) or
+   `SOP-VG-TEMP-04` (>=40°C) at the right threshold.
 4. **Paraphrase #2** — "eating dinner on a blanket outside" (never says
-   "picnic"/"park"), must resolve to a real fuzzy SOP id or an honest
-   no-match, never a fabricated one.
+   "picnic"/"park"), must resolve to a real fuzzy leisure SOP id
+   (`SOP-LEISURE-GOOD`/`-MARGINAL`/`-POOR`) or an honest no-match, never a
+   fabricated one.
 5. **Severe live weather** — asks about biking in Bhopal against live
    Open-Meteo data. See the case's docstring for why the assertion is
-   intentionally weaker than "must say SOP-012": a real weather system is a
-   moving target (see "Known limitations" below).
+   intentionally weaker than "must say `SOP-SEVERE-SYSTEM`": a real weather
+   system is a moving target (see "Known limitations" below).
 6. **No SOP applies** — an unrelated indoor question ("what podcast should I
    listen to"), asserts `primary_sop_id is None` and no invented advice.
 7. **Simulated API outage** — monkeypatches `requests.get` to raise
@@ -193,18 +217,20 @@ model-recalled number could substitute for a fetched one.
    input is a robustness concern; policy-spoofing is a *trust* concern that
    attacks the exact guarantee this whole system exists to provide).
 
-`evals/test_live_sop_addition.py` is the separate "add an 11th SOP with zero
+`evals/test_live_sop_addition.py` is the separate "add an SOP with zero
 code changes" demonstration the assignment explicitly says will be asked for
-live on the review call. It appends a real new SOP directly to
+live on the review call. It appends a real new SOP (`SOP-EX-FOG-01`, low-
+visibility fog — a scenario the shipped 34 don't cover) directly to
 `sops/sops.yaml`, proves it loads and matches, then restores the file. I ran
-this one myself in the build environment (no LLM call needed, just the
-loader + matcher) — output:
+this one myself (no LLM call needed, just the loader + matcher) — output:
 
 ```
-Appended SOP-013 to sops.yaml (no code files touched).
-Confirmed: load_sops() now returns 13 SOPs including SOP-013.
-Numeric match against fog-like facts: ['SOP-004', 'SOP-013']
+Appended SOP-EX-FOG-01 to sops.yaml (no code files touched).
+Confirmed: load_sops() now returns 35 SOPs including SOP-EX-FOG-01.
+Numeric match against fog-like facts: ['SOP-EX-TEMP-03', 'SOP-EX-WIND-01', 'SOP-EX-UV-01', 'SOP-EX-RAIN-01', 'SOP-EX-FOG-01']
+
 PASS: a new SOP was added and correctly matched with zero changes to any .py file -- only sops/sops.yaml was edited.
+
 Restored sops.yaml to its original contents.
 ```
 

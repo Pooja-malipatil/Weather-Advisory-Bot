@@ -72,15 +72,15 @@ def case_clear_high_uv() -> EvalResult:
     # iff check: SOP-001 fires exactly when uv >= 8, regardless of what (if
     # anything) fires instead when it doesn't.
     if uv is not None and uv >= 8:
-        passed = resp.primary_sop_id == "SOP-001"
+        passed = resp.primary_sop_id == "SOP-EX-UV-02"
     else:
-        passed = resp.primary_sop_id != "SOP-001"
+        passed = resp.primary_sop_id != "SOP-EX-UV-02"
     return EvalResult(
         name="Clear case: high UV running question",
         category="clear_match",
-        checking="A direct UV-related exercise question matches SOP-001 when UV is actually >=8, "
+        checking="A direct UV-related exercise question matches SOP-EX-UV-02 when UV is actually >=8, "
                  "and does not falsely fire it when UV is below 8.",
-        pass_criteria="primary_sop_id == 'SOP-001' iff facts['uv_index'] >= 8",
+        pass_criteria="primary_sop_id == 'SOP-EX-UV-02' iff facts['uv_index'] >= 8",
         passed=passed,
         raw_answer=resp.answer,
         extra={"facts": resp.facts, "primary_sop_id": resp.primary_sop_id},
@@ -93,14 +93,14 @@ def case_clear_high_wind_cycling() -> EvalResult:
     resp = ask(new_thread(), "I want to cycle to the market this afternoon in Chennai, is the wind an issue?")
     wind = resp.facts.get("wind_speed_10m")
     if wind is not None and wind > 40:
-        passed = resp.primary_sop_id == "SOP-003"
+        passed = resp.primary_sop_id == "SOP-EX-WIND-03"
     else:
-        passed = resp.primary_sop_id != "SOP-003"
+        passed = resp.primary_sop_id != "SOP-EX-WIND-03"
     return EvalResult(
         name="Clear case: high wind cycling question",
         category="clear_match",
-        checking="A direct wind-related cycling question matches SOP-003 exactly when wind > 40 km/h.",
-        pass_criteria="primary_sop_id == 'SOP-003' iff facts['wind_speed_10m'] > 40",
+        checking="A direct wind-related cycling question matches SOP-EX-WIND-03 exactly when wind > 40 km/h.",
+        pass_criteria="primary_sop_id == 'SOP-EX-WIND-03' iff facts['wind_speed_10m'] > 40",
         passed=passed,
         raw_answer=resp.answer,
         extra={"facts": resp.facts, "primary_sop_id": resp.primary_sop_id},
@@ -119,17 +119,22 @@ def case_paraphrase_elderly_heat() -> EvalResult:
         "should I be worried about her being outside for a while?",
     )
     temp = resp.facts.get("temperature_2m")
-    if temp is not None and temp >= 34:
-        passed = resp.primary_sop_id == "SOP-007"
+    # Two thresholds exist on this axis: SOP-VG-TEMP-03 for [34,40), SOP-VG-TEMP-04 for >=40.
+    if temp is not None and temp >= 40:
+        passed = resp.primary_sop_id == "SOP-VG-TEMP-04"
+    elif temp is not None and temp >= 34:
+        passed = resp.primary_sop_id == "SOP-VG-TEMP-03"
     else:
-        # if not hot enough, we just want it to NOT falsely invoke SOP-007
-        passed = resp.primary_sop_id != "SOP-007"
+        # if not hot enough, we just want it to NOT falsely invoke either heat SOP
+        passed = resp.primary_sop_id not in {"SOP-VG-TEMP-03", "SOP-VG-TEMP-04"}
     return EvalResult(
         name="Paraphrase case: grandmother on the porch (elderly heat)",
         category="paraphrase_match",
         checking="A paraphrased, non-keyword question about an elderly relative sitting outside "
-                 "still correctly maps to activity_hint 'elderly' and matches SOP-007 iff temp >= 34.",
-        pass_criteria="primary_sop_id == 'SOP-007' iff facts['temperature_2m'] >= 34",
+                 "still correctly maps to activity_hint 'elderly' and matches SOP-VG-TEMP-03 "
+                 "(34-40°C) or SOP-VG-TEMP-04 (>=40°C) at the right threshold.",
+        pass_criteria="primary_sop_id == 'SOP-VG-TEMP-04' iff temp>=40; "
+                       "== 'SOP-VG-TEMP-03' iff 34<=temp<40; neither otherwise",
         passed=passed,
         raw_answer=resp.answer,
         extra={"facts": resp.facts, "primary_sop_id": resp.primary_sop_id},
@@ -143,7 +148,9 @@ def case_paraphrase_picnic_fuzzy() -> EvalResult:
         "Thinking of laying out a blanket outside in Chennai this evening and eating dinner "
         "with friends out there instead of indoors, good idea?",
     )
-    passed = resp.primary_sop_id in {"SOP-010", "SOP-011", "SOP-012", None}
+    passed = resp.primary_sop_id in {
+        "SOP-LEISURE-GOOD", "SOP-LEISURE-MARGINAL", "SOP-LEISURE-POOR", "SOP-SEVERE-SYSTEM", None,
+    }
     # Loose because this is genuinely a fuzzy call; the strict check is that
     # it picked a real id (or None), never a fabricated one.
     passed = passed and (resp.primary_sop_id is None or resp.primary_sop_id in ALL_SOP_IDS)
@@ -169,8 +176,8 @@ def case_severe_live_weather() -> EvalResult:
     HONESTY NOTE: this targets Bhopal because that's the real, currently-active
     system named in the assignment brief. By the time anyone reviews this
     (or re-runs it after the system passes on/around Sept 5), it may well be
-    an ordinary day there. We do NOT hardcode "it must say SOP-012" or "it
-    must mention rain" -- we assert the weaker, always-valid thing: whatever
+    an ordinary day there. We do NOT hardcode "it must say SOP-SEVERE-SYSTEM"
+    or "it must mention rain" -- we assert the weaker, always-valid thing: whatever
     the primary SOP is, the answer must be grounded in the REAL fetched
     numbers (we check the answer doesn't contradict facts, and that some
     fetched numeric fact appears reflected in the response rationale via the
@@ -178,8 +185,10 @@ def case_severe_live_weather() -> EvalResult:
     compose_answer only ever receives real facts).
 
     What WOULD make this a strong pass on a review day when severe weather
-    IS active: primary_sop_id == 'SOP-012' or 'SOP-006', and the numbers in
-    resp.facts (precipitation / wind) are visibly elevated. We print both the
+    IS active: primary_sop_id == 'SOP-SEVERE-SYSTEM' (the override category)
+    or one of the high-severity numeric matches (e.g. 'SOP-EX-RAIN-03',
+    'SOP-TR-WIND-03'), and the numbers in resp.facts (precipitation / wind)
+    are visibly elevated. We print both the
     facts and the id either way so a human reviewer can judge the live case
     on the day it's actually run, per the assignment's explicit ask.
     """
@@ -191,8 +200,9 @@ def case_severe_live_weather() -> EvalResult:
         checking="Live Open-Meteo data is actually fetched for Bhopal (not simulated), and whichever "
                  "SOP fires (if any) is a real policy id grounded in those real numbers.",
         pass_criteria="facts non-empty, no error, primary_sop_id is a real id or None. "
-                       "(See docstring: whether it's SOP-012/SOP-006 specifically depends on "
-                       "whether a severe system is active on the day this is run.)",
+                       "(See docstring: whether it's SOP-SEVERE-SYSTEM or a high-severity numeric "
+                       "match specifically depends on whether a severe system is active on the "
+                       "day this is run.)",
         passed=grounded,
         raw_answer=resp.answer,
         notes="Inspect 'extra.facts' manually against real IMD/news reports for the run date "

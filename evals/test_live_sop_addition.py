@@ -3,8 +3,8 @@ Demonstrates the assignment's explicit review-call test: add a new SOP
 without touching graph/, utils/weather.py, or graph/llm.py -- only the
 policy YAML changes.
 
-We append a real new numeric SOP (low-visibility fog, a category the
-shipped 12 don't cover) directly onto sops/sops.yaml, ask a question that
+We append a real new numeric SOP (low-visibility fog, a scenario the
+shipped 34 don't cover) directly onto sops/sops.yaml, ask a question that
 should trigger it, then remove the addition again so the repo is left clean.
 No node code, matcher code, or prompt code is touched at any point --
 match_sops_node() already calls load_sops() fresh on every turn (see its
@@ -29,7 +29,7 @@ load_dotenv()
 SOP_PATH = Path(__file__).resolve().parent.parent / "sops" / "sops.yaml"
 
 NEW_SOP_YAML = """
-- id: SOP-013
+- id: SOP-EX-FOG-01
   category: outdoor_exercise
   title: Low visibility fog risk for road activity
   condition_type: numeric
@@ -54,14 +54,14 @@ def main():
     original_text = SOP_PATH.read_text(encoding="utf-8")
     try:
         SOP_PATH.write_text(original_text + "\n" + NEW_SOP_YAML, encoding="utf-8")
-        print("Appended SOP-013 to sops.yaml (no code files touched).")
+        print("Appended SOP-EX-FOG-01 to sops.yaml (no code files touched).")
 
         from utils.sop_loader import load_sops
 
         sops = load_sops()
         ids = {s.id for s in sops}
-        assert "SOP-013" in ids, "New SOP did not load -- policy hot-reload is broken."
-        print(f"Confirmed: load_sops() now returns {len(sops)} SOPs including SOP-013.")
+        assert "SOP-EX-FOG-01" in ids, "New SOP did not load -- policy hot-reload is broken."
+        print(f"Confirmed: load_sops() now returns {len(sops)} SOPs including SOP-EX-FOG-01.")
 
         from graph.sop_matcher import match_numeric_sops
 
@@ -70,7 +70,7 @@ def main():
         matches = match_numeric_sops(sops, facts, ["cycling"])
         matched_ids = [s.id for s in matches]
         print(f"Numeric match against fog-like facts: {matched_ids}")
-        assert "SOP-013" in matched_ids, "New SOP loaded but did not match as expected."
+        assert "SOP-EX-FOG-01" in matched_ids, "New SOP loaded but did not match as expected."
 
         print("\nPASS: a new SOP was added and correctly matched with zero changes to any "
               ".py file -- only sops/sops.yaml was edited.")
