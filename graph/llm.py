@@ -37,7 +37,7 @@ from typing import Optional
 from google import genai
 from google.genai import types
 
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
 ALLOWED_ACTIVITY_HINTS = [
     "exercise", "cycling", "running", "hiking", "sports", "outdoor_general",
