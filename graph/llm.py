@@ -81,7 +81,6 @@ def _get_client() -> "genai.Client":
                 "Get a free key at https://aistudio.google.com/apikey"
             )
         # TEMP DEBUG -- remove once the auth issue is confirmed fixed.
-        print(f"DEBUG: GEMINI_API_KEY length={len(api_key)}, starts_with={api_key[:10]!r}, ends_with={api_key[-6:]!r}")
         _client = genai.Client(
             api_key=api_key,
             # Per-request timeout, not a retry budget -- keep this reasonable
