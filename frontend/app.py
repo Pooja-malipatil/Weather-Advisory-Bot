@@ -24,7 +24,7 @@ from bot import ask  # noqa: E402
 st.set_page_config(page_title="Weather-Advisory Support Bot", page_icon="🌦️")
 st.title("🌦️ Weather-Advisory Support Bot")
 st.caption(
-    "Ask about outdoor activity safety (cycling, picnics, travel, kids, pets...). "
+    "Ask about outdoor activity safety (cycling, picnics,...). "
     "Every answer is grounded in live weather data and a written policy (SOP) — "
     "or the bot will say plainly that it doesn't have guidance."
 )

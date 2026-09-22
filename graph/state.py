@@ -41,6 +41,7 @@ class GraphState(TypedDict, total=False):
     turn_location_query: Optional[str]
     turn_activity_hints: list[str]
     turn_reused_prior_location: bool
+    turn_is_future_request: bool
 
     turn_error_stage: Optional[str]   # "geocoding" | "forecast" | None
     turn_error_message: Optional[str]

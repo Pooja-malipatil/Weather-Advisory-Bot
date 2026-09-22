@@ -28,6 +28,7 @@ today's Madhya Pradesh system into the assertion.
 from __future__ import annotations
 
 import sys
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,13 +68,13 @@ def new_thread() -> str:
 
 def case_clear_high_uv() -> EvalResult:
     resp = ask(new_thread(), "Is the UV index safe for a run in Chennai around 1pm today?")
-    passed = resp.primary_sop_id == "SOP-001" or (
-        resp.primary_sop_id is not None and resp.facts.get("uv_index", 0) < 8
-    )
-    # If UV genuinely isn't >=8 right now, SOP-001 correctly won't fire -- that's
-    # also a pass (correct behavior), so we check the *logic* not a fixed id.
-    if resp.facts.get("uv_index") is not None and resp.facts["uv_index"] >= 8:
+    uv = resp.facts.get("uv_index")
+    # iff check: SOP-001 fires exactly when uv >= 8, regardless of what (if
+    # anything) fires instead when it doesn't.
+    if uv is not None and uv >= 8:
         passed = resp.primary_sop_id == "SOP-001"
+    else:
+        passed = resp.primary_sop_id != "SOP-001"
     return EvalResult(
         name="Clear case: high UV running question",
         category="clear_match",
@@ -306,7 +307,9 @@ CASES = [
 
 def run_all():
     results = []
-    for case_fn in CASES:
+    for i, case_fn in enumerate(CASES):
+        if i > 0:
+            time.sleep(10)  # stay under gemini-3.5-flash-lite's 15 RPM free-tier limit
         try:
             result = case_fn()
         except Exception as exc:  # noqa: BLE001

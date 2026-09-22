@@ -35,6 +35,7 @@ def parse_query_node(state: GraphState) -> dict:
         h for h in (intent.get("activity_hints") or []) if h in llm.ALLOWED_ACTIVITY_HINTS
     ]
     reused_prior = bool(intent.get("reused_prior_location")) and has_prior_location
+    is_future_request = bool(intent.get("is_future_request"))
 
     if not activity_hints:
         activity_hints = ["outdoor_general", "general"]
@@ -43,6 +44,7 @@ def parse_query_node(state: GraphState) -> dict:
         "turn_location_query": location_query,
         "turn_activity_hints": activity_hints,
         "turn_reused_prior_location": reused_prior,
+        "turn_is_future_request": is_future_request,
         "turn_error_stage": None,
         "turn_error_message": None,
     }
@@ -136,9 +138,10 @@ def compose_answer_node(state: GraphState) -> dict:
     location_label = state.get("turn_location_name") or state.get("session_location_name") or "your location"
     facts = state.get("turn_facts", {})
     user_message = state["turn_user_message"]
+    is_future_request = state.get("turn_is_future_request", False)
 
     if not primary_id:
-        answer = llm.compose_answer(user_message, None, [], facts, location_label)
+        answer = llm.compose_answer(user_message, None, [], facts, location_label, is_future_request)
         return _finalize(answer, primary_id)
 
     primary = sops[primary_id]
@@ -150,6 +153,7 @@ def compose_answer_node(state: GraphState) -> dict:
         [{"id": s.id, "title": s.title, "severity": s.severity} for s in also_relevant],
         facts,
         location_label,
+        is_future_request,
     )
     return _finalize(answer, primary_id)
 
@@ -180,5 +184,9 @@ def honest_fallback_node(state: GraphState) -> dict:
 
     return {
         "turn_final_answer": answer,
+        "turn_primary_sop_id": None,
+        "turn_also_relevant_ids": [],
+        "turn_location_name": None,
+        "turn_facts": {},
         "messages": [AIMessage(content=answer)],
     }

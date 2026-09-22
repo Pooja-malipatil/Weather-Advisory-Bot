@@ -183,6 +183,52 @@
     during early morning or evening, or testing pavement heat with the back
     of your hand (5-second rule) before walking on it.
 
+- id: SOP-013
+  category: pets
+  title: Comfortable pet-walking conditions
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: "<"
+        value: 32
+      - field: precipitation_probability
+        op: "<"
+        value: 50
+      - field: wind_speed_10m
+        op: "<="
+        value: 30
+  applies_when_activity_hint: [pet, dog, dog_walk, walk_dog]
+  severity: informational
+  advice: >
+    Conditions are within a comfortable range for walking pets (moderate
+    temperature, manageable wind, low-to-moderate rain chance). No specific
+    weather precaution is required; use general common sense (water, shade
+    on longer walks).
+
+- id: SOP-014
+  category: outdoor_exercise
+  title: Marginal exercise conditions (mild-to-moderate rain chance)
+  condition_type: numeric
+  condition:
+    all:
+      - field: temperature_2m
+        op: "<"
+        value: 34
+      - field: precipitation_probability
+        op: ">="
+        value: 30
+      - field: precipitation_probability
+        op: "<"
+        value: 70
+  applies_when_activity_hint: [exercise, cycling, running, hiking, sports, outdoor_general]
+  severity: caution
+  advice: >
+    Temperature is mild, but there is a moderate (30-70%) chance of rain.
+    Not dangerous, but bring rain-appropriate gear, check the forecast again
+    closer to departure, and have a shorter/indoor backup plan in mind
+    rather than assuming clear conditions.
+
 - id: SOP-010
   category: outdoor_leisure
   title: Good picnic/park day (fuzzy, non-numeric)

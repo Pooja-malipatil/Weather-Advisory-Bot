@@ -37,10 +37,11 @@ from typing import Optional
 from google import genai
 from google.genai import types
 
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 ALLOWED_ACTIVITY_HINTS = [
     "exercise", "cycling", "running", "hiking", "sports", "outdoor_general",
+    "motorbike", "scooter", "two_wheeler",
     "travel", "commute", "driving", "walking", "boating", "fishing", "coastal",
     "elderly", "children", "infant", "senior_citizen", "vulnerable",
     "pet", "dog", "dog_walk", "walk_dog",
@@ -87,7 +88,7 @@ def extract_intent(
 
     system = f"""You extract structured intent from a user's message to a weather-advisory bot.
 Return ONLY a JSON object, no prose, no markdown fences, matching exactly this shape:
-{{"location_query": <string or null>, "activity_hints": [<zero or more strings from the allowed list>], "reused_prior_location": <true or false>}}
+{{"location_query": <string or null>, "activity_hints": [<zero or more strings from the allowed list>], "reused_prior_location": <true or false>, "is_future_request": <true or false>}}
 
 Rules:
 - location_query: a city/place name mentioned in THIS message. If none is mentioned in this
@@ -95,11 +96,15 @@ Rules:
 - reused_prior_location: set true if this message clearly continues a prior conversation about
   a location without repeating its name (e.g. "what about this evening instead", "is it still bad
   now"), AND {"a prior location IS available" if has_prior_location else "there is NO prior location available, so this must be false"}.
+- is_future_request: set true if the user is asking about a time meaningfully LATER than right now
+  (e.g. "tomorrow", "this weekend", "next Tuesday", "tonight" if it's currently daytime). Set false
+  if the question is about right now / today in general, with no specific future time named.
 - activity_hints: choose only from this exact list, pick every tag that reasonably applies, and
   return an empty list if nothing fits: {ALLOWED_ACTIVITY_HINTS}
-  Map naturally: "bike"/"cycle"/"cycling" -> "cycling"; "walk the dog" -> ["dog_walk","walking"];
-  "picnic"/"park"/"hang out outside" -> ["picnic","park","leisure"] as fitting; a general/unclear
-  outdoor question with no better fit -> ["outdoor_general","general"].
+  Map naturally: "bike"/"cycle"/"cycling" -> "cycling"; "motorbike"/"bike ride" (motorized) ->
+  ["motorbike","two_wheeler"]; "scooter" -> ["scooter","two_wheeler"]; "walk the dog" ->
+  ["dog_walk","walking"]; "picnic"/"park"/"hang out outside" -> ["picnic","park","leisure"] as
+  fitting; a general/unclear outdoor question with no better fit -> ["outdoor_general","general"].
 
 Conversation context so far (for reference only, do not extract location/activity from this,
 only from the LATEST message below):
@@ -107,7 +112,15 @@ only from the LATEST message below):
 """
     user = f"Latest message: {latest_message}"
     raw = _call(system, user, max_tokens=300)
-    return _safe_json(raw, fallback={"location_query": None, "activity_hints": [], "reused_prior_location": False})
+    return _safe_json(
+        raw,
+        fallback={
+            "location_query": None,
+            "activity_hints": [],
+            "reused_prior_location": False,
+            "is_future_request": False,
+        },
+    )
 
 
 def pick_fuzzy_sop(
@@ -156,15 +169,26 @@ def compose_answer(
     also_relevant: list[dict],
     facts: dict,
     location_label: str,
+    is_future_request: bool = False,
 ) -> str:
     """sop: {"id","title","severity","advice"} or None for the no-guidance path."""
 
+    future_caveat = (
+        "\nIMPORTANT: The user asked about a FUTURE time (e.g. tomorrow/later), but the only "
+        "data you have is the CURRENT weather snapshot below -- this system does not fetch "
+        "multi-day forecasts. You MUST explicitly tell the user these are current conditions, "
+        "not a forecast for the time they asked about, and that they should check again closer "
+        "to that time. Do not imply these numbers describe the future."
+        if is_future_request
+        else ""
+    )
+
     if sop is None:
-        system = """You are a weather-advisory bot. No written policy (SOP) covers this question.
+        system = f"""You are a weather-advisory bot. No written policy (SOP) covers this question.
 Say so plainly and kindly in 1-3 sentences. Do NOT invent safety advice of your own. You may
 briefly restate the real weather facts you were given (nothing else), and you may suggest the
 user rephrase or ask about a specific activity if that would plausibly be covered.
-Never claim a policy exists if it doesn't."""
+Never claim a policy exists if it doesn't.{future_caveat}"""
         user = (
             f"Location: {location_label}\n"
             f"Real weather facts: {json.dumps(facts, indent=2)}\n"
@@ -190,7 +214,7 @@ Hard rules:
   the real id given below -- never invent an id.
 - If "Also relevant" policies are listed, you may add ONE brief sentence noting they're also
   relevant by id, but do not restate their full advice text.
-- Be concise, warm, and direct. This is a chat reply, not a report.
+- Be concise, warm, and direct. This is a chat reply, not a report.{future_caveat}
 
 SOP being applied:
 id: {sop['id']}
