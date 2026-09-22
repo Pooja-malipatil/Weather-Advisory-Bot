@@ -122,7 +122,7 @@ def match_sops_node(state: GraphState) -> dict:
     fuzzy_match_id = llm.pick_fuzzy_sop(user_message, fuzzy_candidate_dicts, facts)
     fuzzy_matches = [s for s in fuzzy_candidates if s.id == fuzzy_match_id] if fuzzy_match_id else []
 
-    result = resolve(numeric_matches, fuzzy_matches, activity_hints)
+    result = resolve(numeric_matches, fuzzy_matches)
 
     return {
         "turn_numeric_match_ids": [s.id for s in numeric_matches],

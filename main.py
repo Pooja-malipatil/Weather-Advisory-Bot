@@ -27,10 +27,16 @@ def main():
         if user_message.lower() in {"exit", "quit"}:
             break
 
-        response = ask(thread_id, user_message)
-        print(f"\nBot: {response.answer}")
-        if response.primary_sop_id:
-            print(f"     [Policy: {response.primary_sop_id}]")
+        try:
+            response = ask(thread_id, user_message)
+            print(f"\nBot: {response.answer}")
+            if response.primary_sop_id:
+                print(f"     [Policy: {response.primary_sop_id}]")
+        except RuntimeError as e:
+            if "high demand" in str(e):
+                print(f"\nBot: {e}")
+            else:
+                raise
         print()
 
 

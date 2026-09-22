@@ -32,12 +32,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Optional
 
 from google import genai
 from google.genai import types
+from google.genai import errors as genai_errors
 
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 ALLOWED_ACTIVITY_HINTS = [
     "exercise", "cycling", "running", "hiking", "sports", "outdoor_general",
@@ -51,6 +53,18 @@ ALLOWED_ACTIVITY_HINTS = [
 
 _client: Optional["genai.Client"] = None
 
+# Retry policy: only for genuinely transient server-side overload (5xx).
+# Quota/auth/bad-request errors (4xx) are NOT retried -- sleeping and
+# retrying a 429 "resource exhausted" just burns the user's wait time for
+# an error that won't resolve itself in seconds. Those fail immediately
+# with a clear message instead.
+_MAX_RETRIES = 3
+_BASE_BACKOFF_SECONDS = 1  # 1s, 2s, 4s -> ~7s worst case, not ~31s
+
+
+class LLMQuotaError(RuntimeError):
+    """Raised immediately (no retry) when the API key is out of quota or invalid."""
+
 
 def _get_client() -> "genai.Client":
     global _client
@@ -61,22 +75,62 @@ def _get_client() -> "genai.Client":
                 "GEMINI_API_KEY is not set. Add it to your .env file (see .env.example). "
                 "Get a free key at https://aistudio.google.com/apikey"
             )
-        _client = genai.Client(api_key=api_key)
+        _client = genai.Client(
+            api_key=api_key,
+            # Per-request timeout, not a retry budget -- keep this reasonable
+            # so a single hung request can't stall the whole turn.
+            http_options=types.HttpOptions(timeout=20_000),
+        )
     return _client
 
 
 def _call(system: str, user: str, max_tokens: int = 500) -> str:
     client = _get_client()
-    resp = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=user,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-            max_output_tokens=max_tokens,
-            temperature=0.2,
-        ),
-    )
-    return (resp.text or "").strip()
+    last_exc = None
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=user,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    max_output_tokens=max_tokens,
+                    temperature=0.2,
+                ),
+            )
+            result = (resp.text or "").strip()
+            if not result:
+                print(
+                    "DEBUG: empty response. finish_reason:",
+                    resp.candidates[0].finish_reason if resp.candidates else "no candidates",
+                )
+            return result
+
+        except genai_errors.ClientError as e:
+            # 4xx: quota exhausted (429), bad/expired key (401/403), bad
+            # request (400). None of these get better by waiting a few
+            # seconds and retrying the same key -- fail fast with a clear
+            # message so the caller (and the user) knows to check the key
+            # or quota rather than sitting through a silent multi-second
+            # retry loop that was never going to succeed.
+            status = getattr(e, "code", None) or getattr(e, "status_code", None)
+            if status == 429:
+                raise LLMQuotaError(
+                    "Gemini API quota exceeded for this key. Switch GEMINI_API_KEY to a key "
+                    "with remaining quota, or wait for the quota window to reset."
+                ) from e
+            raise LLMQuotaError(f"Gemini API rejected the request ({status}): {e}") from e
+
+        except genai_errors.ServerError as e:
+            # 5xx: genuinely transient overload -- worth a short, capped retry.
+            last_exc = e
+            if attempt < _MAX_RETRIES - 1:
+                wait = _BASE_BACKOFF_SECONDS * (2 ** attempt)
+                print(f"Gemini overloaded (attempt {attempt + 1}/{_MAX_RETRIES}), retrying in {wait}s...")
+                time.sleep(wait)
+
+    raise last_exc
 
 
 def extract_intent(
