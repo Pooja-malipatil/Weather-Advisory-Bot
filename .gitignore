@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.streamlit/
+*.egg-info/
+.DS_Store
+eval_results.json
