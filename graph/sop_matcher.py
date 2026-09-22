@@ -58,7 +58,7 @@ def _activity_is_relevant(sop: SOP, activity_hints: list[str]) -> bool:
     if not sop.applies_when_activity_hint:
         return True  # no restriction declared -> applies broadly
     hints = {h.lower() for h in activity_hints}
-    return any(h.lower() in hints for h in sop.applies_when_activity_hint) or "general" in hints
+    return any(h.lower() in hints for h in sop.applies_when_activity_hint)
 
 
 def evaluate_numeric_sop(sop: SOP, facts: dict) -> bool:
